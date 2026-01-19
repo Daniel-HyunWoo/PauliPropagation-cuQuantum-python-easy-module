@@ -55,6 +55,32 @@ cupp.destroy_pauli_expansion_view(view)
 
 ### 3. Quantum Operators
 
+#### Gate 종류
+
+##### 1. Pauli Rotation Gate
+- 형태: $e^{-i\theta P/2}$, P는 Pauli 연산자
+- API: `create_pauli_rotation_gate_operator`
+- Pauli 종류: 0=I, 1=X, 2=Z, 3=Y
+
+##### 2. Clifford Gate
+- CNOT, CZ, H, S 등 
+- API: `create_clifford_gate_operator`
+- Gate 종류:
+  - 0: I (CNOT)
+  - 1: X
+  - 2: Z
+  - 3: Y
+  - 4: H
+  - 5: S
+  - 7: CX [target, control] 순임;;;
+  - 8: CZ
+  - 9: CY
+  - 10: SWAP
+  - 11: ISWAP
+  - 12: SQRTX
+  - 13: SQRTZ
+  - 14: SQRTY
+
 ```python
 # Pauli Rotation Gate: exp(-i * angle/2 * P)
 # P = X, Y, Z 또는 tensor product
