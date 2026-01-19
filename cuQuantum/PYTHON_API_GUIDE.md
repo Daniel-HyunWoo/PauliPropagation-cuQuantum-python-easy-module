@@ -91,8 +91,7 @@ operator = cupp.create_pauli_rotation_gate_operator(
     angle,                  # 회전 각도 (라디안)
     num_qubits,            # gate가 작용하는 큐비트 수
     qubits.ctypes.data,    # 큐비트 인덱스
-    paulis.ctypes.data     # Pauli 종류 (0=I, 1=X, 2=Y, 3=Z)
-)
+    paulis.ctypes.data     
 
 # Clifford Gate (CNOT, CZ, S, H 등)
 qubits = np.array([control, target], dtype=np.int32)
@@ -105,17 +104,10 @@ operator = cupp.create_clifford_gate_operator(
 # Operator 삭제
 cupp.destroy_operator(operator)
 ```
+---
 
-**Clifford Gate 종류:**
-- `0`: CX (CNOT)
-- `1`: CY
-- `2`: CZ
-- `3`: S
-- `4`: S†
-- `5`: H (Hadamard)
-- `6`: X
-- `7`: Y
-- `8`: Z
+#### Hadamard 분해
+H = RZ(π/2) RY(π/2) RZ(π/2)
 
 ### 4. Gate 적용 (Pauli Propagation 핵심!)
 
