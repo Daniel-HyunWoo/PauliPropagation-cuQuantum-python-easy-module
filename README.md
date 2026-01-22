@@ -48,7 +48,7 @@ Pauli Propagation Surrogate는 cuQuantum, CuPy, PyTorch 등 GPU 가속 Python �
 자세한 패키지 목록은 `requirements.txt` 참고
 
 ## 참고 및 문의
-- 문의: [Your Name or Email]
+- 문의: [kimhw7537@gmail.com]
 - 라이선스: MIT License (LICENSE 파일 참고)
 
 ## 기타
