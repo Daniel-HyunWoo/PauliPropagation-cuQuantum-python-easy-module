@@ -1,22 +1,46 @@
 from cuquantum.bindings import cupauliprop as cupp
 import re
 import cupy as cp
+import numpy as np
 import time
+from types import SimpleNamespace
+
 
 __version__ = "0.1.0"
 
 def observable_evolution(
     handle=None, gate_ops=None, input_expansion=None, output_expansion=None, workspace=None,
-    truncation_strategies=None, ctx=None,
-    d_input_pauli_buffer=None, d_input_coef_buffer=None, d_output_pauli_buffer=None, d_output_coef_buffer=None
+    truncation_strategies=None,
+    d_input_pauli_buffer=None, d_input_coef_buffer=None, d_output_pauli_buffer=None, d_output_coef_buffer=None,
+    ctx=None, ctx_trunc = None
 ):
     """
     Pauli observable propagation through a circuit.
-    Returns: (evolved_expansion, final_num_terms, input_expansion, output_expansion)
+
+    Args:
+        handle (optional): cuPauliProp handle.
+        gate_ops (optional): List of gate operators.
+        input_expansion (optional): Input Pauli expansion.
+        output_expansion (optional): Output Pauli expansion.
+        workspace (optional): Workspace descriptor.
+        truncation_strategies (optional): Truncation strategies.
+        d_input_pauli_buffer (optional): Input Pauli buffer.
+        d_input_coef_buffer (optional): Input coefficient buffer.
+        d_output_pauli_buffer (optional): Output Pauli buffer.
+        d_output_coef_buffer (optional): Output coefficient buffer.
+        ctx (SimpleNamespace, optional): Context object for state passing.
+        ctx_trunc (SimpleNamespace, optional): Truncation context.
+
+    Returns:
+        tuple: (evolved_expansion, final_num_terms, input_expansion, output_expansion)
+
+    Raises:
+        ValueError: If required arguments are missing.
+        RuntimeError: If term overflow occurs.
     """
     # Robustly set num_qubits for debug print
     num_qubits = None
-    if ctx is not None:
+    if ctx:
         handle = ctx.handle
         num_qubits = ctx.num_qubits
         gate_ops = ctx.gate_ops
@@ -50,6 +74,8 @@ def observable_evolution(
     else:
         if handle is None or gate_ops is None or input_expansion is None or output_expansion is None or workspace is None:
             raise ValueError("observable_evolution: ctx가 없으면 handle, gate_ops, input_expansion, output_expansion, workspace를 모두 인자로 넘겨야 합니다.")
+        
+        ############### 이 부분 조금 더 스마트하게 처리할 수 있을 듯 ###############
         if 'max_terms' in locals():
             max_terms = max_terms
         else:
@@ -58,10 +84,12 @@ def observable_evolution(
             num_packed_ints = num_packed_ints
         else:
             num_packed_ints = 1
+
         d_input_pauli_buffer = locals().get('d_input_pauli_buffer', None)
         d_input_coef_buffer = locals().get('d_input_coef_buffer', None)
         d_output_pauli_buffer = locals().get('d_output_pauli_buffer', None)
         d_output_coef_buffer = locals().get('d_output_coef_buffer', None)
+        
         if d_input_pauli_buffer is None or d_input_coef_buffer is None or d_output_pauli_buffer is None or d_output_coef_buffer is None:
             raise ValueError("observable_evolution: ctx 없이 호출 시 *_buffer도 인자로 넘겨야 합니다.")
         # Try to infer num_qubits from input_expansion if not set
@@ -70,15 +98,30 @@ def observable_evolution(
                 num_qubits = input_expansion.num_qubits
             except Exception:
                 num_qubits = 0
+        ########################################################################
+
+
 
     current_input = input_expansion
     current_output = output_expansion
     s = time.time()
 
+
     for gate_idx, gate in enumerate(reversed(gate_ops)):
         gate_number = len(gate_ops) - gate_idx
         num_terms = cupp.pauli_expansion_get_num_terms(handle, current_input)
         print(f"Gate {gate_number} (reverse): {num_terms} input terms")
+
+        ###### Truncation 설정 ######
+        apply_truncation = (gate_idx % ctx_trunc.num_gates_between_truncations == 0) if ctx_trunc else False
+        if apply_truncation:
+            truncation_strategies = ctx_trunc.trunc_strategies
+            num_truncation_strategies = ctx_trunc.num_trunc_strategies
+        else:
+            truncation_strategies = None
+            num_truncation_strategies = 0
+        #############################
+
 
         input_view = cupp.pauli_expansion_get_contiguous_range(
             handle, current_input, 0, num_terms
@@ -89,7 +132,7 @@ def observable_evolution(
             1,  # adjoint
             1,  # sort
             0,  # keep_duplicates
-            0,  # num_truncation_strategies
+            num_truncation_strategies,
             truncation_strategies,
             workspace,
         )
@@ -112,14 +155,14 @@ def observable_evolution(
             buffer_coef = d_output_coef_buffer
         pauli_data = buffer_pauli[:new_num_terms*2*num_packed_ints].get()
         coef_data = buffer_coef[:new_num_terms].get()
-        for j in range(min(new_num_terms, 2)):
+        for j in range(min(new_num_terms, 3)):
             x_mask = pauli_data[2*j]; z_mask = pauli_data[2*j + 1]; coef = coef_data[j]
             if num_qubits is not None and num_qubits > 0:
                 print(f"    Term {j}: X=0b{x_mask:0{num_qubits}b} Z=0b{z_mask:0{num_qubits}b} coef={coef:+.4f}")
             else:
                 print(f"    Term {j}: X=0b{x_mask:b} Z=0b{z_mask:b} coef={coef:+.4f}")
-        if new_num_terms > 5:
-            print(f"    ... and {new_num_terms - 5} more terms")
+        if new_num_terms > 3:
+            print(f"    ... and {new_num_terms - 3} more terms")
         print()
 
     final_num_terms = cupp.pauli_expansion_get_num_terms(handle, current_input)
@@ -136,13 +179,33 @@ def observable_evolution(
 
 def compute_expectation(
     handle=None, evolved_expansion=None, final_num_terms=None, input_expansion=None, output_expansion=None,
-    ctx=None,
     num_packed_ints=None, num_qubits=None, workspace=None,
-    d_input_pauli_buffer=None, d_input_coef_buffer=None, d_output_pauli_buffer=None, d_output_coef_buffer=None
+    d_input_pauli_buffer=None, d_input_coef_buffer=None, d_output_pauli_buffer=None, d_output_coef_buffer=None,
+    ctx=None
 ):
     """
     Calculate expectation value ⟨0|O'|0⟩ for the evolved observable.
-    ctx: must contain *_buffer, num_packed_ints, workspace
+
+    Args:
+        handle (optional): cuPauliProp handle.
+        evolved_expansion (optional): Evolved Pauli expansion.
+        final_num_terms (optional): Number of terms in evolved expansion.
+        input_expansion (optional): Input Pauli expansion.
+        output_expansion (optional): Output Pauli expansion.
+        num_packed_ints (optional): Number of packed integers.
+        num_qubits (optional): Number of qubits.
+        workspace (optional): Workspace descriptor.
+        d_input_pauli_buffer (optional): Input Pauli buffer.
+        d_input_coef_buffer (optional): Input coefficient buffer.
+        d_output_pauli_buffer (optional): Output Pauli buffer.
+        d_output_coef_buffer (optional): Output coefficient buffer.
+        ctx (SimpleNamespace, optional): Context object for state passing.
+
+    Returns:
+        float: Expectation value ⟨0|O'|0⟩.
+
+    Raises:
+        ValueError: If required arguments are missing.
     """
     # ctx가 있으면 ctx에서 모든 값 추출
     if ctx is not None:
@@ -206,7 +269,7 @@ def compute_expectation(
     final_view = cupp.pauli_expansion_get_contiguous_range(
         handle, evolved_expansion, 0, final_num_terms
     )
-    import numpy as np
+
     result = np.array([0.0], dtype=np.float64)
     cupp.pauli_expansion_view_compute_trace_with_zero_state(
         handle,
@@ -220,14 +283,21 @@ def compute_expectation(
     return result[0]
 
 
-def create_observable(terms: list[tuple[float, str]], num_qubits: int = None) -> list[tuple[float, int, int]]:
-    """ 사용자 친화적 형식 → cuPauliProp 형식 변환     
+def create_observable(terms: list[tuple[float, str]] = None, num_qubits: int = None, ctx = None) -> list[tuple[float, int, int]]:
+    """
+    Convert user-friendly observable format to cuPauliProp format.
+
     Args:
-        terms: List of (coefficient, pauli_string) tuples
-               예: [(0.8, "X0 X2 Z1"), (-0.6, "X4 Z3")]
-        num_qubits: 큐비트 개수 (범위 검증용, None이면 검증 안 함)
+        terms (list of tuple[float, str], optional): List of (coefficient, pauli_string) tuples.
+            Example: [(0.8, "X0 X2 Z1"), (-0.6, "X4 Z3")]
+        num_qubits (int, optional): Number of qubits (for range checking).
+        ctx (SimpleNamespace, optional): Context object for state passing.
+
     Returns:
-        List of (coef, X_mask, Z_mask) tuples
+        list of tuple[float, int, int]: List of (coef, X_mask, Z_mask) tuples.
+
+    Raises:
+        ValueError: If a qubit index is out of range.
     """
 
     def pauli_string_to_masks(pauli_str):
@@ -269,6 +339,9 @@ def create_observable(terms: list[tuple[float, str]], num_qubits: int = None) ->
         
         return X_mask, Z_mask
 
+    if ctx:
+        num_qubits = ctx.num_qubits
+        terms = ctx.terms
 
     obs_terms = []
     for coef, pauli_str in terms:
@@ -278,20 +351,30 @@ def create_observable(terms: list[tuple[float, str]], num_qubits: int = None) ->
     print('당신이 정의한 관측자의 mask 표현:')
     for i, (coef, xm, zm) in enumerate(obs_terms):
         print(f"Term {i}: coef={coef:+.1f}, X_mask=0b{xm:010b}, Z_mask=0b{zm:010b}")
+    if ctx:
+        ctx.obs_terms = obs_terms
     return obs_terms
 
 # 사용 예시
 
-def observable_to_cuQU_input(obs_terms: list[tuple[float, int, int]]) -> tuple[cp.ndarray, cp.ndarray]:
-    """ cuPauliProp 입력 형식으로 변환
+def observable_to_cuQU_input(obs_terms: list[tuple[float, int, int]] = None, ctx = None) -> tuple[cp.ndarray, cp.ndarray]:
+    """
+    Convert observable terms to cuPauliProp input format.
+
     Args:
-        obs_terms: List of (coef, X_mask, Z_mask) tuples
+        obs_terms (list of tuple[float, int, int], optional): List of (coef, X_mask, Z_mask) tuples.
+        ctx (SimpleNamespace, optional): Context object for state passing.
+
     Returns:
-        Two lists: pauli_list and coef_list
+        tuple: (d_input_pauli, d_input_coef) as CuPy arrays.
     """
     print('당신의 관측자가 cuPauliProp 입력 형식으로 변환됩니다')
     pauli_list = []
     coef_list = []
+    
+    if ctx:
+        obs_terms = ctx.obs_terms
+    
     for coef, X_mask, Z_mask in obs_terms:
         pauli_list.extend([X_mask, Z_mask])
         coef_list.append(coef)
@@ -299,39 +382,55 @@ def observable_to_cuQU_input(obs_terms: list[tuple[float, int, int]]) -> tuple[c
     
     d_input_pauli = cp.array(pauli_list, dtype=cp.uint64)
     d_input_coef  = cp.array(coef_list, dtype=cp.float64)
+    if ctx is not None:
+        ctx.d_input_pauli = d_input_pauli
+        ctx.d_input_coef = d_input_coef
     return d_input_pauli, d_input_coef
 
 
-def get_packed_ints(num_qubits: int) -> int:
-    """ 주어진 큐비트 수에 필요한 packed integers 수 계산
+def get_packed_ints(num_qubits: int, ctx = None) -> int:
+    """
+    Calculate the number of packed integers needed for a given number of qubits.
+
     Args:
-        num_qubits: Number of qubits
+        num_qubits (int): Number of qubits.
+        ctx (SimpleNamespace, optional): Context object for state passing.
+
     Returns:
-        Number of packed integers needed
+        int: Number of packed integers needed.
     """
     num_packed_ints = (num_qubits + 63) // 64
     print(f"큐비트 수: {num_qubits}, 필요한 packed integers 수: {num_packed_ints}")
+    if ctx:
+        ctx.num_qubits = num_qubits
+        ctx.num_packed_ints = num_packed_ints
     return num_packed_ints
 
 
-def make_handle() -> int:
+def make_handle(ctx = None) -> int:
     """
-    Make cuPauliProp handle and print initialization message.
-    Returns: int == cuPauliProp handle == ptr to internal cuPauliProp structure
-    """    
+    Create a cuPauliProp handle and print initialization message.
+
+    Args:
+        ctx (SimpleNamespace, optional): Context object for state passing.
+
+    Returns:
+        int: cuPauliProp handle (pointer to internal structure).
+    """
     
         # 새로운 handle 생성
     handle = cupp.create()
     print("cuPauliProp 핸들 생성 완료.")
+    if ctx:
+        ctx.handle = handle
     return handle
 
 
 def cleanup_cupauli():
     """
-    cuPauliProp 리소스 최종 정리
-    
-    사용법: 노트북 맨 마지막에서 호출
-        cleanup_cupauli()
+    Final cleanup of cuPauliProp resources.
+
+    Typical usage: Call at the end of a notebook or script.
     """
     print("리소스 정리 중...")
     
@@ -378,6 +477,19 @@ def cleanup_cupauli():
 
 
 def create_buffer(NUM_QUBITS=None, d_input_pauli=None, d_input_coef=None, max_terms=None,ctx = None) -> tuple[cp.ndarray, cp.ndarray, cp.ndarray, cp.ndarray]:    
+    """
+    Allocate and initialize input/output buffers for Pauli propagation.
+
+    Args:
+        NUM_QUBITS (int, optional): Number of qubits.
+        d_input_pauli (cp.ndarray, optional): Input Pauli array.
+        d_input_coef (cp.ndarray, optional): Input coefficient array.
+        max_terms (int, optional): Maximum number of terms.
+        ctx (SimpleNamespace, optional): Context object for state passing.
+
+    Returns:
+        tuple: (max_terms, (d_input_pauli_buffer, d_input_coef_buffer, d_output_pauli_buffer, d_output_coef_buffer))
+    """
     if ctx:
         NUM_QUBITS = ctx.num_qubits
         d_input_pauli = ctx.d_input_pauli
@@ -422,12 +534,21 @@ def create_buffer(NUM_QUBITS=None, d_input_pauli=None, d_input_coef=None, max_te
     d_input_coef_buffer[:len(d_input_coef)] = d_input_coef
     ##########################################################################################
 
+    if ctx is not None:
+        ctx.max_terms = max_terms
+        ctx.d_input_pauli_buffer = d_input_pauli_buffer
+        ctx.d_input_coef_buffer = d_input_coef_buffer
+        ctx.d_output_pauli_buffer = d_output_pauli_buffer
+        ctx.d_output_coef_buffer = d_output_coef_buffer
     return max_terms, (d_input_pauli_buffer, d_input_coef_buffer,
             d_output_pauli_buffer, d_output_coef_buffer)
 
 
 # 공용 정리 함수: workspace 해제 + CuPy 메모리 캐시 반환
 def cleanup_workspace_and_memory():
+    """
+    Release workspace and clear CuPy memory pools.
+    """
     global workspace
     ws_prev = globals().get('workspace', None)
     if ws_prev is not None:
@@ -453,6 +574,21 @@ def cleanup_workspace_and_memory():
 
 
 def create_workspace(handle=None, d_input_pauli_buffer=None, d_input_coef_buffer=None, d_output_pauli_buffer=None, d_output_coef_buffer=None, ctx=None, frac = 0.8):
+    """
+    Create and allocate a workspace for cuPauliProp operations.
+
+    Args:
+        handle (optional): cuPauliProp handle.
+        d_input_pauli_buffer (cp.ndarray, optional): Input Pauli buffer.
+        d_input_coef_buffer (cp.ndarray, optional): Input coefficient buffer.
+        d_output_pauli_buffer (cp.ndarray, optional): Output Pauli buffer.
+        d_output_coef_buffer (cp.ndarray, optional): Output coefficient buffer.
+        ctx (SimpleNamespace, optional): Context object for state passing.
+        frac (float, optional): Fraction of available memory to use (default 0.8).
+
+    Returns:
+        Workspace descriptor.
+    """
     if ctx:
         handle = ctx.handle
         d_input_pauli_buffer = ctx.d_input_pauli_buffer
@@ -497,10 +633,97 @@ def create_workspace(handle=None, d_input_pauli_buffer=None, d_input_coef_buffer
 
     # 전역 workspace 핸들 저장 및 반환
     workspace = ws_desc
+    if ctx is not None:
+        ctx.workspace = workspace
     return ws_desc
 
+def make_truncation(coef: bool = False, coef_cutoff=None, max_terms: bool = False, max_terms_cutoff = None, freq = None):
+    
+    """
+    Create a truncation context for Pauli propagation.
+
+    Args:
+        coef (bool, optional): Whether to use coefficient-based truncation.
+        coef_cutoff (float, optional): Coefficient cutoff value.
+        max_terms (bool, optional): Whether to use max-terms-based truncation.
+        max_terms_cutoff (int, optional): Maximum number of terms allowed.
+        freq (int, optional): Frequency of truncation (default 3).
+
+    Returns:
+        SimpleNamespace: Truncation context with strategies and parameters.
+
+    Raises:
+        ValueError: If required parameters are missing.
+    """
+    trunc_ctx = SimpleNamespace()
+    trunc_ctx.coef = False
+    trunc_ctx.max_terms = False
+
+    if (not coef) and (not max_terms):
+        raise ValueError("At least one truncation strategy (coef or max_terms) must be specified.\n\
+                         Why are you calling make_truncation() if you don't want any truncation?")
+    
+    if max_terms and max_terms_cutoff is None:
+        raise ValueError("max_terms_cutoff must be provided when max_terms is True.")
+    if coef and coef_cutoff is None:
+        raise ValueError("coef_cutoff must be provided when coef is True.")
+    
+    if freq == None:
+        freq = 3  # 기본값 설정
+        print(f"Truncation frequency not provided. Using default value: {freq}\n\
+              To set a custom frequency, provide the 'freq' parameter when calling make_truncation() with int parameter .")
+
+    trunc_strategies = []
+    if coef and coef_cutoff:
+        CUPAULIPROP_TRUNCATION_STRATEGY_COEFFICIENT_BASED = 0
+        coef_trunc_params = cupp.CoefficientTruncationParams()
+        coef_trunc_params.cutoff = coef_cutoff
+
+        trunc_strat_coef = cupp.TruncationStrategy()
+        trunc_strat_coef.strategy = CUPAULIPROP_TRUNCATION_STRATEGY_COEFFICIENT_BASED
+        trunc_strat_coef.param_struct = coef_trunc_params.ptr
+        trunc_strategies.append(trunc_strat_coef)
+
+        trunc_ctx.coef = True
+        trunc_ctx.coef_cutoff = coef_cutoff
+        
+    if max_terms and max_terms_cutoff:
+        CUPAULIPROP_TRUNCATION_STRATEGY_PAULI_WEIGHT_BASED = 1
+        max_terms_trunc_params = cupp.PauliWeightTruncationParams()
+        max_terms_trunc_params.cutoff = max_terms_cutoff
+
+        trunc_strat_weight = cupp.TruncationStrategy()
+        trunc_strat_weight.strategy = CUPAULIPROP_TRUNCATION_STRATEGY_PAULI_WEIGHT_BASED
+        trunc_strat_weight.param_struct = max_terms_trunc_params.ptr
+        trunc_strategies.append(trunc_strat_weight)
+        
+        trunc_ctx.max_terms = True
+        trunc_ctx.max_terms_cutoff = max_terms_cutoff
+
+    num_trunc_strategies = len(trunc_strategies)
+
+    trunc_ctx.trunc_strategies = trunc_strategies
+    trunc_ctx.num_trunc_strategies = num_trunc_strategies
+    trunc_ctx.num_gates_between_truncations = freq
+    
+    return trunc_ctx
 
 def reset_expansions(handle=None, NUM_QUBITS=None, d_input_pauli_buffer=None, d_input_coef_buffer=None, d_output_pauli_buffer=None, d_output_coef_buffer=None, ctx = None):
+    """
+    Reset (destroy and recreate) Pauli expansions for input and output.
+
+    Args:
+        handle (optional): cuPauliProp handle.
+        NUM_QUBITS (int, optional): Number of qubits.
+        d_input_pauli_buffer (cp.ndarray, optional): Input Pauli buffer.
+        d_input_coef_buffer (cp.ndarray, optional): Input coefficient buffer.
+        d_output_pauli_buffer (cp.ndarray, optional): Output Pauli buffer.
+        d_output_coef_buffer (cp.ndarray, optional): Output coefficient buffer.
+        ctx (SimpleNamespace, optional): Context object for state passing.
+
+    Returns:
+        tuple: (input_expansion, output_expansion)
+    """
     if ctx:
         handle = ctx.handle
         NUM_QUBITS = ctx.num_qubits
@@ -537,10 +760,20 @@ def reset_expansions(handle=None, NUM_QUBITS=None, d_input_pauli_buffer=None, d_
         0,
     )
 
+    if ctx is not None:
+        ctx.input_expansion = input_expansion
+        ctx.output_expansion = output_expansion
     return input_expansion, output_expansion
 
 
 class CircuitBuilder:
+    """
+    Helper class to build quantum circuits for cuPauliProp.
+
+    Args:
+        handle: cuPauliProp handle.
+        num_qubits: Number of qubits.
+    """
     def __init__(self, handle, num_qubits):
         self.pauli_dict = {"I":0, "X":1, "Y":2, "Z":3}
         self.clifford_dict = {"I":0, "X":1, "Y":2, "Z":3, "H":4, "S":5,
