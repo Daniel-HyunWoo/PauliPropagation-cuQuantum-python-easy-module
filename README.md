@@ -1,41 +1,55 @@
 
 # Pauli Propagation Surrogate
 
-## 프로젝트 개요
-Pauli Propagation Surrogate는 cuQuantum, CuPy, PyTorch 등 GPU 가속 Python 라이브러리를 활용하여 양자 시뮬레이션 및 파울리 연산자 기반 계산을 빠르고 효율적으로 수행할 수 있도록 지원하는 연구/실험용 코드입니다.
+## Overview
+Pauli Propagation Surrogate is a research/experimental codebase for fast and efficient quantum simulation and Pauli operator-based computation using GPU-accelerated Python libraries such as cuQuantum, CuPy, and PyTorch.
 
-## 주요 기능
-- cuQuantum 기반 파울리 연산자 시뮬레이션
-- GPU 가속 벡터/행렬 연산 (CuPy, PyTorch)
-- 양자 머신러닝 및 VQE 등 예제 제공
-- Jupyter Notebook 예제 및 튜토리얼 포함
+## Features
+- Pauli operator simulation using cuQuantum
+- GPU-accelerated vector/matrix operations (CuPy, PyTorch)
+- Example notebooks for quantum machine learning, VQE, and more
+- Jupyter Notebook tutorials and ready-to-run scripts
 
-## 설치 방법
-1. Conda 환경 준비 및 패키지 설치
+## Project Structure
+
+- `src/easy_cuQU.py`: Main Python module for easy Pauli propagation
+- `cuQuantum/cuQu_example.ipynb`: Main usage example notebook
+- `cuQuantum/my_tutorial_v2.ipynb`: Step-by-step tutorial
+- `cuQuantum/truncation.ipynb`: Truncation strategies and memory optimization
+- `cuQuantum/PYTHON_API_GUIDE.md`: cuQuantum Python API usage guide
+- `Gradient_example/VQE_cuQu.ipynb`: VQE and gradient-based quantum algorithms
+- `src/information.ipynb`: In-depth Pauli propagation guide
+- `requirements.txt`: Full list of required Python packages
+- `ENV_SETUP.sh`: Quick environment setup script (conda + pip)
+- `LICENSE`: MIT License
+
+## Installation
+1. Prepare a conda environment and install all dependencies:
 	```bash
 	bash ENV_SETUP.sh
 	```
-	또는 수동 설치:
+	Or manual setup:
 	```bash
 	conda create -n cuQu python=3.11
 	conda activate cuQu
 	pip install -r requirements.txt
 	```
 
-2. 환경 활성화
+2. Activate the environment:
 	```bash
 	conda activate cuQu
 	```
 
-## 사용법
-- 주요 스크립트: `src/easy_cuQU.py`
-- 예제 노트북: `cuQuantum/cuQu_example.ipynb`, `cuQuantum/my_tutorial_v2.ipynb`
-- 실행 예시:
+## Usage
+- Main script: `src/easy_cuQU.py`
+- Example notebooks: `cuQuantum/cuQu_example.ipynb`, `cuQuantum/my_tutorial_v2.ipynb`
+- Run example:
 	```bash
 	python src/easy_cuQU.py
 	```
 
-## 의존성
+## Dependencies
+Key packages:
 - cuquantum-python-cu12
 - cupy-cuda12x
 - numpy, pandas, matplotlib, seaborn
@@ -45,11 +59,11 @@ Pauli Propagation Surrogate는 cuQuantum, CuPy, PyTorch 등 GPU 가속 Python �
 - tqdm, h5py, plotly, networkx, pillow
 - pennylane, cudaq
 
-자세한 패키지 목록은 `requirements.txt` 참고
+See `requirements.txt` for the full list.
 
-## 참고 및 문의
-- 문의: [kimhw7537@gmail.com]
-- 라이선스: MIT License (LICENSE 파일 참고)
+## License & Contact
+- License: MIT License (see LICENSE file)
+- Contact: kimhw7537@gmail.com
 
-## 기타
-- 본 코드는 연구 및 실험 목적이며, 상업적 사용 전 별도 문의 바랍니다.
+## Notes
+- This code is intended for research and experimental use. For commercial use, please contact the author in advance.
