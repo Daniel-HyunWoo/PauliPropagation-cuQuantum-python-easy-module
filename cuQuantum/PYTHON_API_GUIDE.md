@@ -1,89 +1,89 @@
-# cuPauliProp Python Bindings 사용 가이드
+# cuPauliProp Python Bindings Usage Guide
 
-## 설치
+## Installation
 
-최신 cuQuantum Python (24.08+)이 필요합니다:
+Requires cuQuantum Python (24.08+) or later:
 
-## 주요 함수 설명
+## Main Function Descriptions
 
 ### 1. Library Management
 
 ```python
-# Handle 생성 - 모든 함수 호출에 필요
+# Create a handle - required for all function calls
 handle = cupp.create()
 
-# Stream 설정 (선택사항)
+# Set stream (optional)
 cupp.set_stream(handle, cuda_stream)
 
-# Handle 삭제
+# Destroy handle
 cupp.destroy(handle)
 ```
 
-### 2. Pauli Expansion 관리
+### 2. Pauli Expansion Management
 
 ```python
-# Packed integer 개수 계산
-# num_qubits=4 → 1개, num_qubits=128 → 2개
+# Calculate number of packed integers
+# num_qubits=4 → 1, num_qubits=128 → 2
 num_packed = cupp.get_num_packed_integers(num_qubits)
 
-# Pauli expansion 생성
+# Create Pauli expansion
 expansion = cupp.create_pauli_expansion(
     handle,
-    num_qubits,           # 큐비트 개수
-    pauli_buffer_ptr,     # GPU 메모리 포인터 (Pauli strings)
-    pauli_buffer_size,    # Buffer 크기 (bytes)
-    coef_buffer_ptr,      # GPU 메모리 포인터 (계수들)
-    coef_buffer_size,     # Buffer 크기 (bytes)
+    num_qubits,           # Number of qubits
+    pauli_buffer_ptr,     # GPU memory pointer (Pauli strings)
+    pauli_buffer_size,    # Buffer size (bytes)
+    coef_buffer_ptr,      # GPU memory pointer (coefficients)
+    coef_buffer_size,     # Buffer size (bytes)
     data_type,            # 1=CUDA_R_64F (float64)
-    num_terms,            # 현재 term 개수
-    is_sorted,            # 1=정렬됨, 0=아님
-    is_unique             # 1=중복없음, 0=중복있음
+    num_terms,            # Current number of terms
+    is_sorted,            # 1=sorted, 0=not sorted
+    is_unique             # 1=unique, 0=not unique
 )
 
-# Term 개수 확인
+# Check number of terms
 n = cupp.pauli_expansion_get_num_terms(handle, expansion)
 
-# View 생성 (range 선택)
+# Create view (select range)
 view = cupp.pauli_expansion_get_contiguous_range(
     handle, expansion, start_idx, num_terms
 )
 
-# Expansion 삭제
+# Destroy expansion
 cupp.destroy_pauli_expansion(expansion)
 cupp.destroy_pauli_expansion_view(view)
 ```
 
 ### 3. Quantum Operators
 
-#### Gate 종류
+#### Gate Types
 
 ##### 1. Pauli Rotation Gate
-- 형태: $e^{-i\theta P/2}$, P는 Pauli 연산자
+- Form: $e^{-i\theta P/2}$, P is a Pauli operator
 - API: `create_pauli_rotation_gate_operator`
-- Pauli 종류: 0=I, 1=X, 2=Z, 3=Y
+- Pauli types: 0=I, 1=X, 2=Z, 3=Y
 
 ##### 2. Clifford Gate
-- CNOT, CZ, H, S 등 
+- CNOT, CZ, H, S, etc.
 - API: `create_clifford_gate_operator`
-- Gate 종류:
-  - 0: I (CNOT)
-  - 1: X
-  - 2: Z
-  - 3: Y
-  - 4: H
-  - 5: S
-  - 7: CX [target, control] 순임;;;
-  - 8: CZ
-  - 9: CY
-  - 10: SWAP
-  - 11: ISWAP
-  - 12: SQRTX
-  - 13: SQRTZ
-  - 14: SQRTY
+- Gate types:
+    - 0: I (CNOT)
+    - 1: X
+    - 2: Z
+    - 3: Y
+    - 4: H
+    - 5: S
+    - 7: CX [target, control] order
+    - 8: CZ
+    - 9: CY
+    - 10: SWAP
+    - 11: ISWAP
+    - 12: SQRTX
+    - 13: SQRTZ
+    - 14: SQRTY
 
 ```python
 # Pauli Rotation Gate: exp(-i * angle/2 * P)
-# P = X, Y, Z 또는 tensor product
+# P = X, Y, Z or tensor product
 qubits = np.array([0, 1], dtype=np.int32)
 paulis = np.array([1, 2], dtype=np.int32)  # X⊗Y
 operator = cupp.create_pauli_rotation_gate_operator(
@@ -93,7 +93,7 @@ operator = cupp.create_pauli_rotation_gate_operator(
     qubits.ctypes.data,    # 큐비트 인덱스
     paulis.ctypes.data     
 
-# Clifford Gate (CNOT, CZ, S, H 등)
+# Clifford Gate (CNOT, CZ, S, H, etc.)
 qubits = np.array([control, target], dtype=np.int32)
 operator = cupp.create_clifford_gate_operator(
     handle,
@@ -101,44 +101,44 @@ operator = cupp.create_clifford_gate_operator(
     qubits.ctypes.data     # 큐비트 인덱스
 )
 
-# Operator 삭제
+# Destroy operator
 cupp.destroy_operator(operator)
 ```
 ---
 
-#### Hadamard 분해
+#### Hadamard Decomposition
 H = RZ(π/2) RY(π/2) RZ(π/2)
 
-### 4. Gate 적용 (Pauli Propagation 핵심!)
+### 4. Gate Application (Core of Pauli Propagation!)
 
 ```python
-# Operator를 Pauli expansion에 적용
+# Apply operator to Pauli expansion
 cupp.pauli_expansion_view_compute_operator_application(
     handle,
     input_view,            # 입력 expansion view
     output_expansion,      # 출력 expansion (결과 저장)
     operator,              # 적용할 gate
     adjoint,               # 1=adjoint, 0=normal
-    make_sorted,           # 1=출력 정렬, 0=안함
-    keep_duplicates,       # 1=중복허용, 0=중복제거
-    num_truncations,       # Truncation 전략 개수
-    truncation_strategies, # Truncation 배열
+    make_sorted,           # 1=output sorted, 0=not sorted
+    keep_duplicates,       # 1=allow duplicates, 0=remove duplicates
+    num_truncations,       # Number of truncation strategies
+    truncation_strategies, # Truncation array
     workspace             # Workspace descriptor
 )
 ```
 
-### 5. Truncation (메모리 절약)
+### 5. Truncation (Memory Saving)
 
 ```python
-# 계수 기반 truncation
+# Coefficient-based truncation
 coef_trunc = cupp.CoefficientTruncationParams()
 coef_trunc.cutoff = 1e-4  # |coefficient| < 1e-4 제거
 
-# Pauli weight 기반 truncation  
+# Pauli weight-based truncation  
 weight_trunc = cupp.PauliWeightTruncationParams()
 weight_trunc.cutoff = 8   # weight > 8 제거
 
-# Truncation strategy 배열 생성
+# Create truncation strategy array
 truncations = [
     cupp.TruncationStrategy(
         strategy_kind=0,  # COEFFICIENT_BASED
@@ -151,10 +151,10 @@ truncations = [
 ]
 ```
 
-### 6. 기댓값 계산
+### 6. Expectation Value Calculation
 
 ```python
-# Tr(view * |0⟩⟨0|) 계산
+# Compute Tr(view * |0⟩⟨0|)
 result = np.array([0.0], dtype=np.float64)
 cupp.pauli_expansion_view_compute_trace_with_zero_state(
     handle,
@@ -164,7 +164,7 @@ cupp.pauli_expansion_view_compute_trace_with_zero_state(
 )
 expectation = result[0]
 
-# 두 expansion의 trace
+# Trace of two expansions
 result = np.array([0.0], dtype=np.float64)
 cupp.pauli_expansion_view_compute_trace_with_expansion_view(
     handle,
@@ -175,13 +175,13 @@ cupp.pauli_expansion_view_compute_trace_with_expansion_view(
 )
 ```
 
-### 7. Workspace 관리
+### 7. Workspace Management
 
 ```python
-# Workspace descriptor 생성
+# Create workspace descriptor
 workspace = cupp.create_workspace_descriptor(handle)
 
-# 메모리 할당 및 설정
+# Allocate and set memory
 size = 10 * 1024 * 1024  # 10 MB
 d_buffer = cupy.cuda.alloc(size)
 cupp.workspace_set_memory(
@@ -193,38 +193,38 @@ cupp.workspace_set_memory(
     size                   # 크기 (bytes)
 )
 
-# 필요한 크기 확인
+# Check required size
 required_size = cupp.workspace_get_memory_size(
     handle, workspace, 0, 0
 )
 
-# 삭제
+# Delete
 cupp.destroy_workspace_descriptor(workspace)
 ```
 
-## Pauli String 인코딩 방식
+## Pauli String Encoding Method
 
-Pauli string은 두 개의 bit mask로 표현:
-- **X mask**: X 또는 Y가 있는 위치에 1
-- **Z mask**: Z 또는 Y가 있는 위치에 1
+Pauli strings are represented by two bit masks:
+- **X mask**: 1 where X or Y is present
+- **Z mask**: 1 where Z or Y is present
 
 ```python
-# 예시: XYZI (4 qubits)
+# Example: XYZI (4 qubits)
 # Pauli:  X(0)  Y(1)  Z(2)  I(3)
-# 위치:   bit0  bit1  bit2  bit3
+# Position: bit0  bit1  bit2  bit3
 
 X_mask = 0b0011  # X at 0, Y at 1
 Z_mask = 0b0110  # Y at 1, Z at 2
 
-# Packed array 형식: [X_mask, Z_mask]
+# Packed array format: [X_mask, Z_mask]
 pauli_packed = np.array([0b0011, 0b0110], dtype=np.uint64)
 ```
 
-## 메모리 관리 팁
+## Memory Management Tips
 
-1. **Buffer 크기**: Term이 증가하므로 충분히 크게
-2. **CuPy 사용**: GPU 메모리 관리에 편리
-3. **Pointer 전달**: `.data.ptr` (CuPy) 또는 `.ctypes.data` (NumPy)
+1. **Buffer size**: Make it large enough as the number of terms increases
+2. **Use CuPy**: Convenient for GPU memory management
+3. **Pointer passing**: Use `.data.ptr` (CuPy) or `.ctypes.data` (NumPy)
 
 ```python
 # CuPy (GPU)
@@ -236,7 +236,7 @@ cpu_array = np.zeros(100, dtype=np.int32)
 ptr = cpu_array.ctypes.data
 ```
 
-## 에러 처리
+## Error Handling
 
 ```python
 try:
@@ -244,7 +244,7 @@ try:
     # ... operations ...
 except Exception as e:
     print(f"Error: {e}")
-    # cuPauliProp error code를 확인
+    # Check cuPauliProp error code
     error_msg = cupp.get_error_string(error_code)
     print(f"cuPauliProp: {error_msg}")
 finally:
@@ -252,14 +252,14 @@ finally:
         cupp.destroy(handle)
 ```
 
-## 성능 최적화
+## Performance Optimization
 
-1. **Truncation 사용**: 메모리와 속도 개선
-2. **Stream 사용**: 비동기 실행
-3. **Memory pool**: 반복 할당 피하기
-4. **Sorted/Unique**: 가능하면 유지
+1. **Use truncation**: Improve memory and speed
+2. **Use stream**: Asynchronous execution
+3. **Memory pool**: Avoid repeated allocation
+4. **Sorted/Unique**: Keep if possible
 
-## 참고 자료
+## References
 
 - [cuPauliProp C API](https://docs.nvidia.com/cuda/cuquantum/latest/cupauliprop/index.html)
 - [Python Bindings](https://docs.nvidia.com/cuda/cuquantum/latest/python/bindings/cupauliprop.html)
